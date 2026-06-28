@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+
+<title>BunnyBand Pro</title>
+
+<style>
+body{
+margin:0;
+font-family:Segoe UI;
+background:#f4f7f6;
+}
+
+header{
+background:#007bff;
+color:white;
+padding:15px;
+text-align:center;
+}
+
+nav{
+display:none; /* Only visible after successful login */
+background:#222;
+}
+
+nav button{
+flex:1;
+padding:12px;
+border:none;
+background:none;
+color:white;
+cursor:pointer;
+}
+
+.container{
+padding:15px;
+max-width:600px;
+margin:auto;
+}
+
+.card{
+background:white;
+padding:20px;
+margin:15px 0;
+border-radius:10px;
+box-shadow:0 0 10px rgba(0,0,0,.08);
+}
+
+.section{
+display:none;
+}
+
+.active{
+display:block;
+}
+
+.balance{
+font-size:35px;
+color:#007bff;
+font-weight:bold;
+}
+
+input,
+select,
+button{
+width:100%;
+padding:12px;
+margin-top:10px;
+border-radius:8px;
+border:1px solid #ddd;
+box-sizing: border-box;
+}
+
+button{
+background:#007bff;
+color:white;
+font-weight:bold;
+cursor:pointer;
+}
+
+.small{
+color:green;
+}
+
+.auth-toggle {
+text-align:center;
+margin-top:15px;
+color:#007bff;
+cursor:pointer;
+font-size:14px;
+}
+</style>
+
+<!-- Firebase SDK Libraries (v8) -->
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
+<script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+
+</head>
+
+<body>
+
+<header>
+<h2>BunnyBand Pro Dashboard</h2>
+<p id="welcomeUser">Welcome, Guest</p>
+</header>
+
+<!-- NAVIGATION BAR -->
+<nav id="mainNav">
+<button onclick="show('dashboard')">Dashboard</button>
+<button onclick="show('deposit')">Deposit</button>
+<button onclick="show('tasks')">Tasks</button>
+<button onclick="show('team')">Team</button>
+<button onclick="show('withdraw')">Withdraw</button>
+<button onclick="logout()" style="background:#dc3545;">Logout</button>
+</nav>
+
+<div class="container">
+
+<!-- SIGN IN SECTION -->
+<div id="loginScreen" class="section active card">
+<h3>Log In</h3>
+<input id="loginEmail" type="email" placeholder="Email Address">
+<input id="loginPass" type="password" placeholder="Password">
+<button onclick="loginUser()">Sign In</button>
+<div class="auth-toggle" onclick="toggleAuth('registerScreen')">Don't have an account? Sign Up here</div>
+</div>
+
+<!-- SIGN UP SECTION -->
+<div id="registerScreen" class="section card">
+<h3>Sign Up</h3>
+<input id="regName" type="text" placeholder="Full Name">
+<input id="regEmail" type="email" placeholder="Email Address">
+<input id="regPass" type="password" placeholder="Password">
+<button onclick="registerUser()">Register</button>
+<div class="auth-toggle" onclick="toggleAuth('loginScreen')">Already have an account? Log In here</div>
+</div>
+
+<!-- DASHBOARD -->
+<div id="dashboard" class="section card">
+<h3>Total Balance</h3>
+<div class="balance" id="balance">₦0</div>
+<p class="small">System Active</p>
+</div>
+
+<!-- DEPOSIT -->
+<div id="deposit" class="section card">
+<h3>Deposit</h3>
+<p>Send payment to:</p>
+<input value="9118918906" readonly>
+<input value="Opay" readonly>
+<input value="Usman Isa Dan Asabe" readonly>
+<input id="dAmt" type="number" placeholder="Amount paid">
+<button onclick="deposit()">I Have Paid</button>
+<p id="dMsg"></p>
+</div>
+
+<!-- TASK -->
+<div id="tasks" class="section card">
+<h3>Daily Task</h3>
+<p>Complete task = ₦500</p>
+<button onclick="task()">Complete Task</button>
+<p id="tMsg"></p>
+</div>
+
+<!-- TEAM -->
+<div id="team" class="section card">
+<h3>Your Team</h3>
+<p>No referrals yet</p>
+<input placeholder="Referral Link">
+<button>Copy</button>
+</div>
+
+<!-- WITHDRAW -->
+<div id="withdraw" class="section card">
+<h3>Withdraw</h3>
+<input id="wAmt" type="number" placeholder="Amount">
+<input id="accNo" placeholder="Account Number">
+<select id="bank" onchange="loadName()">
+<option>Select Bank</option>
+<option>Opay</option>
+<option>Palmpay</option>
+<option>GTBank</option>
+<option>UBA</option>
+<option>Access</option>
+<option>Zenith</option>
+</select>
+<input id="accName" readonly placeholder="Account Name">
+<button onclick="withdraw()">Withdraw</button>
+<p id="wMsg"></p>
+</div>
+
+</div>
+
+<script>
+// Your Firebase Configuration
+const firebaseConfig = {
+  apiKey: "AIzaSyDsbvxL1n3dW8v0V7LkbARHrDV0VZjb-Z8",
+  authDomain: "bunnybank-b5715.firebaseapp.com",
+  databaseURL: "https://bunnybank-b5715-default-rtdb.firebaseio.com",
+  projectId: "bunnybank-b5715",
+  storageBucket: "bunnybank-b5715.firebasestorage.app",
+  messagingSenderId: "288359681794",
+  appId: "1:288359681794:web:d34f976d67483c48b5bc1b"
+};
+
+// Initialize Firebase
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const database = firebase.database();
+
+let currentUser = null;
+let balance = 0;
+
+// Auth State Listener
+auth.onAuthStateChanged((user) => {
+    if (user) {
+        currentUser = user;
+        document.getElementById("mainNav").style.display = "flex";
+        
+        // Fetch user info and balance from database
+        database.ref('users/' + user.uid).on('value', (snapshot) => {
+            const data = snapshot.val();
+            if (data) {
+                document.getElementById("welcomeUser").innerText = "Welcome, " + (data.fullName || "User");
+                balance = data.balance || 0;
+            }
+            updateUI();
+        });
+        show('dashboard');
+    } else {
+        currentUser = null;
+        document.getElementById("mainNav").style.display = "none";
+        document.getElementById("welcomeUser").innerText = "Welcome, Guest";
+        toggleAuth('loginScreen');
+    }
+});
+
+// Toggle between Login and Registration screens
+function toggleAuth(screenId) {
+    document.querySelectorAll(".section").forEach(x=>x.classList.remove("active"));
+    document.getElementById(screenId).classList.add("active");
+}
+
+// User Registration (Sign Up)
+function registerUser() {
+    const name = document.getElementById("regName").value.trim();
+    const email = document.getElementById("regEmail").value.trim();
+    const pass = document.getElementById("regPass").value;
+
+    if(!name || !email || !pass) {
+        alert("Please fill in all fields!");
+        return;
+    }
+
+    auth.createUserWithEmailAndPassword(email, pass)
+    .then((userCredential) => {
+        let user = userCredential.user;
+        // Set initial user data in Realtime Database
+        database.ref('users/' + user.uid).set({
+            fullName: name,
+            email: email,
+            balance: 0
+        });
+        alert("Registration successful!");
+    })
+    .catch((error) => {
+        alert("Error: " + error.message);
+    });
+}
+
+// User Authentication (Log In)
+function loginUser() {
+    const email = document.getElementById("loginEmail").value.trim();
+    const pass = document.getElementById("loginPass").value;
+
+    if(!email || !pass) {
+        alert("Please enter email and password!");
+        return;
+    }
+
+    auth.signInWithEmailAndPassword(email, pass)
+    .then(() => {
+        alert("Login successful!");
+    })
+    .catch((error) => {
+        alert("Error: " + error.message);
+    });
+}
+
+// Log Out Function
+function logout() {
+    auth.signOut();
+}
+
+function show(id){
+    if(!currentUser) return; // Prevent navigation if not logged in
+    document.querySelectorAll(".section").forEach(x=>x.classList.remove("active"));
+    document.getElementById(id).classList.add("active");
+}
+
+function updateUI(){
+    document.getElementById("balance").innerText="₦"+balance.toLocaleString();
+}
+
+function saveBalanceToCloud(newBalance) {
+    if(currentUser) {
+        database.ref('users/' + currentUser.uid).update({
+            balance: newBalance
+        });
+    }
+}
+
+function deposit(){
+    let amt=parseFloat(document.getElementById("dAmt").value);
+    if(!amt || amt <= 0){
+        alert("Please enter a valid deposit amount");
+        return;
+    }
+    let newBal = balance + amt;
+    saveBalanceToCloud(newBal);
+    document.getElementById("dAmt").value = "";
+    document.getElementById("dMsg").innerText="Deposit Confirmed";
+}
+
+function task(){
+    let newBal = balance + 500;
+    saveBalanceToCloud(newBal);
+    document.getElementById("tMsg").innerText="+₦500 Added";
+}
+
+function loadName(){
+    let no=document.getElementById("accNo").value;
+    if(no.length>=10){
+        document.getElementById("accName").value="Verified Account";
+    }
+}
+
+function withdraw(){
+    let amt=parseFloat(document.getElementById("wAmt").value);
+    let name=document.getElementById("accName").value;
+
+    if(!amt || amt <= 0){
+        alert("Please enter a valid withdrawal amount");
+        return;
+    }
+
+    if(amt>balance){
+        document.getElementById("wMsg").innerText="Insufficient Balance";
+        return;
+    }
+
+    let newBal = balance - amt;
+    saveBalanceToCloud(newBal);
+    document.getElementById("wAmt").value = "";
+    document.getElementById("wMsg").innerText="Sent to "+name;
+}
+</script>
+
+</body>
+</html>
