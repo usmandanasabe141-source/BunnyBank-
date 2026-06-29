@@ -116,7 +116,7 @@ padding-right: 20px;
 }
 .auth-card {
 background: #1f2023;
-border-radius: 166px;
+border-radius: 16px;
 padding: 25px 20px;
 border: 1px solid #292a2e;
 }
@@ -509,6 +509,7 @@ let totalEarn = 2000;
 let taskCount = 0;
 let taskEarn = 0;
 let activeInvests = 0;
+let lastTaskTimestamp = 0; // Lokacin task na karshe daga database
 const MIN_WITHDRAW_LIMIT = 10000;
 
 function getReferralIdFromUrl() {
@@ -532,11 +533,12 @@ function loadUserData(user) {
             taskCount = data.taskCount || 0;
             taskEarn = data.taskEarn || 0;
             activeInvests = data.activeInvests || 0;
+            lastTaskTimestamp = data.lastTaskTimestamp || 0;
             document.getElementById("welcomeUser").innerText = "Welcome, " + (data.fullName || "User");
         }
         updateUI();
         checkTaskStatus(); 
-        checkInvestmentsPayout(); // Yana duba idan investment ya nuna ko da yaushe
+        checkInvestmentsPayout(); 
     });
 }
 
@@ -597,7 +599,8 @@ function registerUser() {
             totalEarn: initialBalance,
             taskCount: 0,
             taskEarn: 0,
-            activeInvests: 0
+            activeInvests: 0,
+            lastTaskTimestamp: 0
         }).then(() => {
             btn.disabled = false;
             btn.innerText = "Register Now";
@@ -623,21 +626,8 @@ function registerUser() {
         });
     })
     .catch((error) => { 
-        if (error.code === 'auth/email-already-in-use') {
-            auth.signInWithEmailAndPassword(emailSurrogate, pass)
-            .then((userCredential) => {
-                btn.disabled = false;
-                btn.innerText = "Register Now";
-                loadUserData(userCredential.user); 
-            })
-            .catch((logError) => {
-                btn.disabled = false;
-                btn.innerText = "Register Now";
-            });
-        } else {
-            btn.disabled = false;
-            btn.innerText = "Register Now";
-        }
+        btn.disabled = false;
+        btn.innerText = "Register Now";
     });
 }
 
@@ -707,7 +697,7 @@ function updateUI(){
     document.getElementById("cashoutProgressBar").style.width = percentage + "%";
 }
 
-// SAbON GYARA: Ana adana lokacin a Firebase don ya cika 24 hours daidai ko da an kashe waya
+// GYARAN INVESTMENT: Yana biya daidai bayan 24 Hours
 function buyPlan(cost) {
     if(!currentUser) {
         alert("Please log in first.");
@@ -725,7 +715,6 @@ function buyPlan(cost) {
     activeInvests = newActiveInvests;
     updateUI();
 
-    // Sanya bayanan rance a database tare da lokacin da aka saka kuɗin (Timestamp)
     const investmentRef = database.ref('investments/' + currentUser.uid).push();
     investmentRef.set({
         amount: cost,
@@ -743,11 +732,9 @@ function buyPlan(cost) {
     document.getElementById("investMsg").innerText = "Investment plan of ₦" + cost.toLocaleString() + " activated! Capital yields will payout exactly after 24 hours.";
 }
 
-// Wannan aikin yana duba idan awanni 24 sun cika don sauke kuɗi
 function checkInvestmentsPayout() {
     if (!currentUser) return;
-
-    const twentyFourHours = 24 * 60 * 60 * 1000; // Awanni 24 a milliseconds
+    const twentyFourHours = 24 * 60 * 60 * 1000; 
 
     database.ref('investments/' + currentUser.uid).orderByChild('status').equalTo('active').once('value', (snapshot) => {
         const investments = snapshot.val();
@@ -757,14 +744,11 @@ function checkInvestmentsPayout() {
 
         Object.keys(investments).forEach((key) => {
             const invest = investments[key];
-            // Idan lokacin yanzu ya rage lokacin da aka yi rance ya wuce awanni 24
             if (currentTime - invest.timestamp >= twentyFourHours) {
                 
-                // Kulle wannan rance domin kada a sake biya
                 database.ref('investments/' + currentUser.uid + '/' + key).update({
                     status: "completed"
                 }).then(() => {
-                    // Sanya wa mai amfani kuɗinsa a asusu
                     database.ref('users/' + currentUser.uid).once('value', (snap) => {
                         let currentData = snap.val();
                         let finalBal = (currentData.balance || 0) + invest.payoutAmount;
@@ -785,39 +769,40 @@ function checkInvestmentsPayout() {
     });
 }
 
-// Ana duba kowane daƙiƙa 30 ko akwai kuɗin da ya nuna don saukowa
-setInterval(checkInvestmentsPayout, 30000);
+setInterval(checkInvestmentsPayout, 20000);
 
+// GYARAN TASK: Danna sau daya kacal a cikin 24 hours kuma yana duba Database saboda Refresh
 function task(){
     if(!currentUser) {
         alert("Please log in first.");
         return;
     }
 
-    const lastTaskTime = localStorage.getItem("lastTaskTime_" + currentUser.uid);
     const currentTime = Date.now();
     const twentyFourHours = 24 * 60 * 60 * 1000;
 
-    if (lastTaskTime && (currentTime - parseInt(lastTaskTime) < twentyFourHours)) {
+    if (lastTaskTimestamp && (currentTime - lastTaskTimestamp < twentyFourHours)) {
         alert("Locked! You can only perform this task once every 24 hours.");
         checkTaskStatus();
         return;
     }
 
-    localStorage.setItem("lastTaskTime_" + currentUser.uid, currentTime);
-
+    // Kara kudin a gida kafin a tura database don sauri
     balance += 500;
     totalEarn += 500;
     taskEarn += 500;
     taskCount += 1;
+    lastTaskTimestamp = currentTime; 
     updateUI();
     checkTaskStatus();
 
+    // Adana lokaci da kudi a Firebase gaba daya
     database.ref('users/' + currentUser.uid).update({
         balance: balance, 
         totalEarn: totalEarn, 
         taskEarn: taskEarn, 
-        taskCount: taskCount
+        taskCount: taskCount,
+        lastTaskTimestamp: currentTime
     }).then(() => {
         alert("Daily task complete! ₦500 has been credited to your available balance.");
     });
@@ -828,10 +813,8 @@ function checkTaskStatus() {
     const tMsg = document.getElementById("tMsg");
     if (!currentUser) return;
     
-    const lastTaskTime = localStorage.getItem("lastTaskTime_" + currentUser.uid);
-    
-    if (lastTaskTime) {
-        const timePassed = Date.now() - parseInt(lastTaskTime);
+    if (lastTaskTimestamp && lastTaskTimestamp > 0) {
+        const timePassed = Date.now() - lastTaskTimestamp;
         const twentyFourHours = 24 * 60 * 60 * 1000; 
         
         if (timePassed < twentyFourHours) {
@@ -854,7 +837,7 @@ function checkTaskStatus() {
     tMsg.style.color = "green";
 }
 
-setInterval(checkTaskStatus, 15000);
+setInterval(checkTaskStatus, 10000);
 
 function deposit(){
     let amt = parseFloat(document.getElementById("dAmt").value);
